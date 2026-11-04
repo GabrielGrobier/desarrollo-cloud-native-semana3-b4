@@ -1,241 +1,47 @@
-name: CI-CD Cloud Native Semana 3
+deploy:
+  needs: publish
+  runs-on: ubuntu-latest
+  environment: aws-demo
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+  steps:
+  - name: Descargar repositorio
+    uses: actions/checkout@v4
 
+  - name: Crear directorio y copiar Compose a EC2
+    uses: appleboy/scp-action@v0.1.7
+    with:
+      host: ${{ secrets.EC2_HOST }}
+      username: ${{ secrets.EC2_USER }}
+      key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+      source: docker-compose.aws.yml
+      target: ~/cloudnative
 
-permissions:
-  contents: read
-
-concurrency:
-  group: semana3-deploy-ec2
-  cancel-in-progress: false
-
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Descargar repositorio
-      uses: actions/checkout@v4
-
-    - name: Configurar Java 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: temurin
-        java-version: '17'
-        cache: maven
-
-    - name: Pruebas unitarias y compilacion
-      run: mvn -B -ntp clean verify
-
-    - name: Guardar artefactos Maven
-      uses: actions/upload-artifact@v4
-      with:
-        name: maven-artifacts
-        path: |
-          document-service/target/*.jar
-          storage-service/target/*.jar
-        retention-days: 1
-        if-no-files-found: error
-
-  publish:
-    needs: verify
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Descargar repositorio
-      uses: actions/checkout@v4
-
-    - name: Recuperar artefactos
-      uses: actions/download-artifact@v4
-      with:
-        name: maven-artifacts
-        path: .
-
-    - name: Configurar QEMU
-      uses: docker/setup-qemu-action@v3
-
-    - name: Configurar Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Autenticarse en Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Publicar document-service
-      uses: docker/build-push-action@v6
-      with:
-        context: ./document-service
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/cloudnative-documents:${{ github.sha }}
-          ${{ secrets.DOCKERHUB_USERNAME }}/cloudnative-documents:latest
-
-    - name: Publicar storage-service
-      uses: docker/build-push-action@v6
-      with:
-        context: ./storage-service
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/cloudnative-storage:${{ github.sha }}
-          ${{ secrets.DOCKERHUB_USERNAME }}/cloudnative-storage:latest
-
-  deploy:
-    needs: publish
-    runs-on: ubuntu-latest
-    environment: aws-demo
-
-    steps:
-    - name: Descargar repositorio
-      uses: actions/checkout@v4
-
-    - name: Validar configuracion
-      env:
-        EC2_HOST: ${{ secrets.EC2_HOST }}
-        EC2_USER: ${{ secrets.EC2_USER }}
-        SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        EC2_HOST_KEY: ${{ secrets.EC2_HOST_KEY }}
-        DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
-        AWS_REGION: ${{ secrets.AWS_REGION }}
-        S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      run: |
-        set -euo pipefail
-
-        for name in \
-          EC2_HOST EC2_USER SSH_PRIVATE_KEY EC2_HOST_KEY \
-          DOCKERHUB_USER AWS_ACCESS_KEY_ID \
-          AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
-          AWS_REGION S3_BUCKET
-        do
-          test -n "${!name}" || {
-            echo "Falta configurar: $name"
-            exit 1
-          }
-        done
-
-        [[ "$EC2_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
-        [[ "$EC2_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
-        [[ "$DOCKERHUB_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
-        [[ "$AWS_REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]
-        [[ "$S3_BUCKET" =~ ^[a-z0-9.-]+$ ]]
-
-    - name: Configurar llave SSH
-      env:
-        SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        EC2_HOST_KEY: ${{ secrets.EC2_HOST_KEY }}
-        EC2_HOST: ${{ secrets.EC2_HOST }}
-      run: |
-        set -euo pipefail
-
-        mkdir -p ~/.ssh
-        chmod 700 ~/.ssh
-
-        printf '%s\n' "$SSH_PRIVATE_KEY" \
-          > ~/.ssh/ec2.pem
-        chmod 600 ~/.ssh/ec2.pem
-
-        printf '%s\n' "$EC2_HOST_KEY" \
-          > ~/.ssh/known_hosts
-        chmod 600 ~/.ssh/known_hosts
-
-        ssh-keygen -F "$EC2_HOST" >/dev/null || {
-          echo "EC2_HOST_KEY no contiene el host configurado"
-          exit 1
-        }
-
-    - name: Preparar variables AWS Learner Lab
-      env:
-        DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        IMAGE_TAG: ${{ github.sha }}
-        AWS_REGION: ${{ secrets.AWS_REGION }}
-        S3_BUCKET: ${{ secrets.S3_BUCKET }}
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
-      run: |
-        set -euo pipefail
+  - name: Desplegar microservicios por SSH
+    uses: appleboy/ssh-action@v1.0.3
+    env:
+      DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      IMAGE_TAG: ${{ github.sha }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+    with:
+      host: ${{ secrets.EC2_HOST }}
+      username: ${{ secrets.EC2_USER }}
+      key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+      envs: DOCKERHUB_USER,DOCKERHUB_TOKEN,IMAGE_TAG,AWS_REGION,S3_BUCKET,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,AWS_SESSION_TOKEN
+      command_timeout: 15m
+      script: |
+        set -eu
         umask 077
 
-        {
-          printf 'DOCKERHUB_USER=%s\n' "$DOCKERHUB_USER"
-          printf 'IMAGE_TAG=%s\n' "$IMAGE_TAG"
-          printf 'AWS_REGION=%s\n' "$AWS_REGION"
-          printf 'S3_BUCKET=%s\n' "$S3_BUCKET"
-          printf 'AWS_ACCESS_KEY_ID=%s\n' "$AWS_ACCESS_KEY_ID"
-          printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$AWS_SECRET_ACCESS_KEY"
-          printf 'AWS_SESSION_TOKEN=%s\n' "$AWS_SESSION_TOKEN"
-        } > .env.deploy
+        cd ~/cloudnative
 
-        chmod 600 .env.deploy
-
-    - name: Crear directorio en EC2
-      env:
-        EC2_HOST: ${{ secrets.EC2_HOST }}
-        EC2_USER: ${{ secrets.EC2_USER }}
-      run: |
-        ssh -i ~/.ssh/ec2.pem \
-          -o StrictHostKeyChecking=yes \
-          -o ConnectTimeout=20 \
-          "${EC2_USER}@${EC2_HOST}" \
-          'sudo mkdir -p /opt/cloudnative &&
-           sudo chown "$(id -u):$(id -g)" /opt/cloudnative'
-
-    - name: Copiar Docker Compose a EC2
-      env:
-        EC2_HOST: ${{ secrets.EC2_HOST }}
-        EC2_USER: ${{ secrets.EC2_USER }}
-      run: |
-        scp -i ~/.ssh/ec2.pem \
-          -o StrictHostKeyChecking=yes \
-          docker-compose.aws.yml \
-          "${EC2_USER}@${EC2_HOST}:/opt/cloudnative/docker-compose.aws.yml"
-
-    - name: Copiar configuracion de AWS a EC2
-      env:
-        EC2_HOST: ${{ secrets.EC2_HOST }}
-        EC2_USER: ${{ secrets.EC2_USER }}
-      run: |
-        scp -i ~/.ssh/ec2.pem \
-          -o StrictHostKeyChecking=yes \
-          .env.deploy \
-          "${EC2_USER}@${EC2_HOST}:/opt/cloudnative/.env.tmp"
-
-        ssh -i ~/.ssh/ec2.pem \
-          -o StrictHostKeyChecking=yes \
-          "${EC2_USER}@${EC2_HOST}" \
-          'cd /opt/cloudnative &&
-           chmod 600 .env.tmp &&
-           mv .env.tmp .env &&
-           chmod 600 .env'
-
-    - name: Desplegar contenedores por SSH
-      env:
-        EC2_HOST: ${{ secrets.EC2_HOST }}
-        EC2_USER: ${{ secrets.EC2_USER }}
-      run: |
-        ssh -i ~/.ssh/ec2.pem \
-          -o StrictHostKeyChecking=yes \
-          -o ConnectTimeout=20 \
-          "${EC2_USER}@${EC2_HOST}" \
-          'bash -se' <<'REMOTE'
-        set -euo pipefail
-
-        cd /opt/cloudnative
-
-        echo "Verificando montaje EFS"
-
+        # Comprobar que EFS esta montado
         mountpoint -q /mnt/efs || {
-          echo "ERROR: EFS no esta montado en /mnt/efs"
+          echo "ERROR: EFS no esta montado"
           exit 1
         }
 
@@ -244,36 +50,45 @@ jobs:
           exit 1
         }
 
-        echo "Validando Docker Compose"
+        # Crear archivo de variables
+        printf 'DOCKERHUB_USER=%s\nIMAGE_TAG=%s\nAWS_REGION=%s\nS3_BUCKET=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_SESSION_TOKEN=%s\n' \
+          "$DOCKERHUB_USER" "$IMAGE_TAG" "$AWS_REGION" "$S3_BUCKET" \
+          "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" "$AWS_SESSION_TOKEN" > .env.tmp
+
+        chmod 600 .env.tmp
+        mv .env.tmp .env
+
+        # Autenticacion Docker Hub
+        printf '%s' "$DOCKERHUB_TOKEN" | \
+          docker login -u "$DOCKERHUB_USER" \
+          --password-stdin >/dev/null
+
+        # Validar configuracion
         docker compose \
           --env-file .env \
           -f docker-compose.aws.yml \
           config --quiet
 
-        echo "Descargando imagenes"
+        # Descargar imagenes
         docker compose \
           --env-file .env \
-          -f docker-compose.aws.yml \
-          pull
+          -f docker-compose.aws.yml pull
 
-        echo "Actualizando microservicios"
+        # Iniciar microservicios
         docker compose \
           --env-file .env \
           -f docker-compose.aws.yml \
           up -d --remove-orphans
 
-        echo "Estado de contenedores"
+        # Verificar contenedores
         docker compose \
           --env-file .env \
-          -f docker-compose.aws.yml \
-          ps
+          -f docker-compose.aws.yml ps
 
-        echo "Verificando API REST"
-        for attempt in $(seq 1 30); do
-          if curl -fsS \
-            http://127.0.0.1:8080/api/health; then
-            echo
-            echo "Backend disponible"
+        # Verificar API
+        for attempt in $(seq 1 35); do
+          if curl -fsS http://localhost:8080/api/health; then
+            echo "Despliegue exitoso"
             exit 0
           fi
           sleep 5
@@ -287,13 +102,3 @@ jobs:
           logs --tail=60
 
         exit 1
-        REMOTE
-
-    - name: Confirmar despliegue
-      run: |
-        echo "Despliegue SSH completado"
-        echo "Microservicios actualizados en EC2"
-
-    - name: Eliminar credenciales temporales del runner
-      if: always()
-      run: rm -f .env.deploy ~/.ssh/ec2.pem
