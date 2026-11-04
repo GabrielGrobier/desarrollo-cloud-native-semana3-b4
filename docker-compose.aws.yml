@@ -1,6 +1,7 @@
 
 services:
   storage:
+    platform: linux/arm64
     image: ${DOCKERHUB_USER}/cloudnative-storage:${IMAGE_TAG}
     container_name: cloudnative-storage
     restart: unless-stopped
@@ -24,6 +25,7 @@ services:
       - cloudnative
 
   documents:
+    platform: linux/arm64
     image: ${DOCKERHUB_USER}/cloudnative-documents:${IMAGE_TAG}
     container_name: cloudnative-documents
     restart: unless-stopped
