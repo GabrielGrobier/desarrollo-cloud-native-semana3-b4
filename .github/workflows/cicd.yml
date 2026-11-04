@@ -157,8 +157,8 @@ jobs:
             exit 1
           }
 
-          test -d /mnt/efs/cloudnative || {
-            echo "ERROR: No existe /mnt/efs/cloudnative"
+          test -d /mnt/efs/ || {
+            echo "ERROR: No existe /mnt/efs/"
             exit 1
           }
 
