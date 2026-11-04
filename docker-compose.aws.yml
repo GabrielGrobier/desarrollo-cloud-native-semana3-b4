@@ -1,0 +1,17 @@
+services:
+  storage:
+    image: ${DOCKERHUB_USER}/cloudnative-storage:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      AWS_REGION: ${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      EFS_PATH: /mnt/efs
+    volumes:
+      - /mnt/efs/cloudnative:/mnt/efs
+  documents:
+    image: ${DOCKERHUB_USER}/cloudnative-documents:${IMAGE_TAG}
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    environment:
+      STORAGE_SERVICE_URL: http://storage:8081
+    depends_on: [storage]

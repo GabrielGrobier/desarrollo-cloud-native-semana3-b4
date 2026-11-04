@@ -1,0 +1,71 @@
+name: CI-CD Cloud Native Semana 3
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Pruebas unitarias y compilacion
+        run: mvn -B clean verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maven-artifacts
+          path: |
+            document-service/target/*.jar
+            storage-service/target/*.jar
+          retention-days: 1
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: maven-artifacts
+          path: .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publicar document-service
+        uses: docker/build-push-action@v6
+        with:
+          context: document-service
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/cloudnative-documents:${{ github.sha }}
+      - name: Publicar storage-service
+        uses: docker/build-push-action@v6
+        with:
+          context: storage-service
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/cloudnative-storage:${{ github.sha }}
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: aws-demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Desplegar mediante SSM y verificar
+        env:
+          INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          IMAGE_TAG: ${{ github.sha }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+        run: bash scripts/deploy-ssm.sh
