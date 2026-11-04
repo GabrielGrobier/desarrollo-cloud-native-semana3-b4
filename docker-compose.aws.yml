@@ -16,7 +16,7 @@ services:
       SERVER_PORT: "8081"
 
     volumes:
-      - /mnt/efs/cloudnative:/mnt/efs
+      - /mnt/efs/:/mnt/efs
 
     expose:
       - "8081"
