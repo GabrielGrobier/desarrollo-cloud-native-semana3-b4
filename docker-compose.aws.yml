@@ -150,23 +150,19 @@ jobs:
 
             cd ~/cloudnative
 
-            echo "1. Verificando montaje de Amazon EFS"
+            echo "Verificando montaje de Amazon EFS"
 
             mountpoint -q /mnt/efs || {
               echo "ERROR: EFS no esta montado en /mnt/efs"
               exit 1
             }
 
-            echo "2. Corrigiendo permisos de Amazon EFS"
+            echo "Corrigiendo permisos de Amazon EFS"
 
             sudo chown 999:999 /mnt/efs
             sudo chmod 750 /mnt/efs
 
-            echo "Permisos de EFS configurados"
-
-            ls -ldn /mnt/efs
-
-            echo "3. Creando configuracion de entorno"
+            echo "Creando configuracion de entorno"
 
             printf 'DOCKERHUB_USER=%s\nIMAGE_TAG=%s\nAWS_REGION=%s\nS3_BUCKET=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_SESSION_TOKEN=%s\n' \
               "$DOCKERHUB_USER" \
@@ -180,53 +176,47 @@ jobs:
             chmod 600 .env.tmp
             mv .env.tmp .env
 
-            echo "4. Autenticando Docker Hub"
+            echo "Autenticando Docker Hub"
 
             printf '%s' "$DOCKERHUB_TOKEN" | \
               docker login \
                 -u "$DOCKERHUB_USER" \
                 --password-stdin >/dev/null
 
-            echo "5. Validando Docker Compose"
+            echo "Validando Docker Compose"
 
             docker compose \
               --env-file .env \
               -f docker-compose.aws.yml \
               config --quiet
 
-            echo "6. Descargando imagenes ARM64"
+            echo "Descargando imagenes ARM64"
 
             docker compose \
               --env-file .env \
               -f docker-compose.aws.yml \
               pull
 
-            echo "7. Desplegando microservicios"
+            echo "Desplegando microservicios"
 
             docker compose \
               --env-file .env \
               -f docker-compose.aws.yml \
               up -d --remove-orphans
 
-            echo "8. Estado de contenedores"
+            echo "Estado de contenedores"
 
             docker compose \
               --env-file .env \
               -f docker-compose.aws.yml \
               ps
 
-            echo "9. Verificando permisos de escritura en EFS"
+            echo "Verificando escritura en EFS"
 
             docker exec cloudnative-storage \
-              sh -c 'touch /mnt/efs/.prueba-cicd && rm /mnt/efs/.prueba-cicd' || {
-                echo "ERROR: storage-service no tiene permisos de escritura en EFS"
-                docker logs cloudnative-storage --tail 50
-                exit 1
-              }
+              sh -c 'touch /mnt/efs/.prueba-cicd && rm /mnt/efs/.prueba-cicd'
 
-            echo "Escritura en EFS verificada correctamente"
-
-            echo "10. Verificando servicio de documentos"
+            echo "Verificando servicio de documentos"
 
             for attempt in $(seq 1 35); do
               if curl -fsS \
